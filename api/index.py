@@ -27,7 +27,6 @@ def calculate_p95(latencies):
         return 0
     sorted_latencies = sorted(latencies)
     n = len(sorted_latencies)
-    # Use the "exclusive" method (like numpy percentile with interpolation='linear')
     index = 0.95 * (n - 1)
     lower = int(index)
     upper = lower + 1
@@ -67,7 +66,10 @@ async def analytics_endpoint(request: Request):
         avg_latency = mean([r.get("latency_ms", 0) for r in region_data])
         latencies = [r.get("latency_ms", 0) for r in region_data]
         p95_latency = calculate_p95(latencies)
-        avg_uptime = mean([r.get("uptime", 0) for r in region_data])
+        
+        # Use uptime_pct (not uptime)
+        avg_uptime = mean([r.get("uptime_pct", 0) for r in region_data])
+        
         breaches = sum(1 for r in region_data if r.get("latency_ms", 0) > threshold_ms)
         
         results.append({
