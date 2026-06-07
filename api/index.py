@@ -1,53 +1,80 @@
-from fastapi import FastAPI, Request
+# api/index.py
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-import json
 from statistics import mean
-import math
+import json
+import os
 
 app = FastAPI()
 
+# Enable CORS for POST requests from any origin
 @app.middleware("http")
-async def cors(request: Request, call_next):
+async def add_cors_headers(request, call_next):
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "POST"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "*"
     return response
 
-
-def percentile(arr, p):
-    arr = sorted(arr)
-    k = (len(arr) - 1) * p
-    f = math.floor(k)
-    c = math.ceil(k)
-    if f == c:
-        return arr[int(k)]
-    return arr[f] * (c - k) + arr[c] * (k - f)
-
-
-@app.post("/")
-async def analytics_endpoint(request: Request):
-    data = await request.json()
-
+@app.post("/analytics")
+def analytics_endpoint(data: dict):
+    # Get the regions and threshold from the request body
     regions = data.get("regions", [])
-    threshold = data.get("threshold_ms", 180)
-
-    with open("q-vercel-latency.json") as f:
-        telemetry = json.load(f)
-
-    output = {}
-
+    threshold_ms = data.get("threshold_ms", 180)
+    
+    # Load the telemetry data from the JSON file
+    try:
+        # Get the file path - in Vercel serverless, it's in the root directory
+        file_path = os.path.join(os.path.dirname(__file__), "..", "q-vercel-latency.json")
+        with open(file_path, "r") as f:
+            telemetry = json.load(f)
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Telemetry file not found"}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error reading file: {str(e)}"}
+        )
+    
+    # Calculate metrics for each region
+    results = []
+    
     for region in regions:
-        records = [r for r in telemetry if r["region"] == region]
+        # Filter data for this region
+        region_data = [record for record in telemetry if record.get("region") == region]
+        
+        if not region_data:
+            continue
+        
+        # Calculate average latency (mean)
+        avg_latency = mean([record.get("latency_ms", 0) for record in region_data])
+        
+        # Calculate p95 latency (95th percentile)
+        latencies = sorted([record.get("latency_ms", 0) for record in region_data])
+        p95_index = int(len(latencies) * 0.95)
+        # Handle edge case where list is empty or p95_index is out of bounds
+        p95_latency = latencies[min(p95_index, len(latencies) - 1)] if latencies else 0
+        
+        # Calculate average uptime (mean)
+        avg_uptime = mean([record.get("uptime", 0) for record in region_data])
+        
+        # Count breaches (records where latency_ms > threshold_ms)
+        breaches = sum(1 for record in region_data if record.get("latency_ms", 0) > threshold_ms)
+        
+        results.append({
+            "region": region,
+            "avg_latency": avg_latency,
+            "p95_latency": p95_latency,
+            "avg_uptime": avg_uptime,
+            "breaches": breaches
+        })
+    
+    return JSONResponse(content=results)
 
-        latencies = [r["latency_ms"] for r in records]
-        uptimes = [r["uptime_pct"] for r in records]
-
-        output[region] = {
-            "avg_latency": mean(latencies),
-            "p95_latency": percentile(latencies, 0.95),
-            "avg_uptime": mean(uptimes),
-            "breaches": sum(l > threshold for l in latencies)
-        }
-
-    return JSONResponse(output)
+# Optional: Root endpoint for testing
+@app.get("/")
+def read_root():
+    return {"message": "Analytics endpoint is running!"}
