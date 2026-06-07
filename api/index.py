@@ -7,7 +7,6 @@ import os
 
 app = FastAPI()
 
-# CORS headers dictionary
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
@@ -22,6 +21,21 @@ async def cors_middleware(request: Request, call_next):
         response.headers[key] = value
     return response
 
+def calculate_p95(latencies):
+    """Calculate 95th percentile using linear interpolation"""
+    if not latencies:
+        return 0
+    sorted_latencies = sorted(latencies)
+    n = len(sorted_latencies)
+    # Use the "exclusive" method (like numpy percentile with interpolation='linear')
+    index = 0.95 * (n - 1)
+    lower = int(index)
+    upper = lower + 1
+    if upper >= n:
+        return sorted_latencies[-1]
+    weight = index - lower
+    return sorted_latencies[lower] * (1 - weight) + sorted_latencies[upper] * weight
+
 @app.post("/analytics")
 async def analytics_endpoint(request: Request):
     try:
@@ -29,10 +43,7 @@ async def analytics_endpoint(request: Request):
         regions = body.get("regions", [])
         threshold_ms = body.get("threshold_ms", 180)
     except:
-        response = JSONResponse(
-            status_code=400,
-            content={"error": "Invalid JSON", "regions": []}
-        )
+        response = JSONResponse(status_code=400, content={"error": "Invalid JSON", "regions": []})
         for key, value in CORS_HEADERS.items():
             response.headers[key] = value
         return response
@@ -42,10 +53,7 @@ async def analytics_endpoint(request: Request):
         with open(file_path, "r") as f:
             telemetry = json.load(f)
     except FileNotFoundError:
-        response = JSONResponse(
-            status_code=404,
-            content={"error": "File not found", "regions": []}
-        )
+        response = JSONResponse(status_code=404, content={"error": "File not found", "regions": []})
         for key, value in CORS_HEADERS.items():
             response.headers[key] = value
         return response
@@ -57,9 +65,8 @@ async def analytics_endpoint(request: Request):
             continue
         
         avg_latency = mean([r.get("latency_ms", 0) for r in region_data])
-        latencies = sorted([r.get("latency_ms", 0) for r in region_data])
-        p95_index = int(len(latencies) * 0.95)
-        p95_latency = latencies[min(p95_index, len(latencies) - 1)] if latencies else 0
+        latencies = [r.get("latency_ms", 0) for r in region_data]
+        p95_latency = calculate_p95(latencies)
         avg_uptime = mean([r.get("uptime", 0) for r in region_data])
         breaches = sum(1 for r in region_data if r.get("latency_ms", 0) > threshold_ms)
         
@@ -71,7 +78,6 @@ async def analytics_endpoint(request: Request):
             "breaches": breaches
         })
     
-    # Return with regions array at top level
     response = JSONResponse(content={"regions": results})
     for key, value in CORS_HEADERS.items():
         response.headers[key] = value
