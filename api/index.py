@@ -1,5 +1,5 @@
 # api/index.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from statistics import mean
 import json
@@ -7,13 +7,24 @@ import os
 
 app = FastAPI()
 
-# Enable CORS for POST requests from any origin
+# Handle CORS preflight OPTIONS requests
+@app.options("/analytics")
+async def cors_preflight(request: Request):
+    response = JSONResponse(content={})
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Max-Age"] = "86400"
+    return response
+
+# Enable CORS for all requests
 @app.middleware("http")
-async def add_cors_headers(request, call_next):
+async def add_cors_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
 @app.post("/analytics")
@@ -55,7 +66,6 @@ def analytics_endpoint(data: dict):
         # Calculate p95 latency (95th percentile)
         latencies = sorted([record.get("latency_ms", 0) for record in region_data])
         p95_index = int(len(latencies) * 0.95)
-        # Handle edge case where list is empty or p95_index is out of bounds
         p95_latency = latencies[min(p95_index, len(latencies) - 1)] if latencies else 0
         
         # Calculate average uptime (mean)
