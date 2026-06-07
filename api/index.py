@@ -31,7 +31,7 @@ async def analytics_endpoint(request: Request):
     except:
         response = JSONResponse(
             status_code=400,
-            content={"error": "Invalid JSON"}
+            content={"error": "Invalid JSON", "regions": []}
         )
         for key, value in CORS_HEADERS.items():
             response.headers[key] = value
@@ -44,7 +44,7 @@ async def analytics_endpoint(request: Request):
     except FileNotFoundError:
         response = JSONResponse(
             status_code=404,
-            content={"error": "File not found"}
+            content={"error": "File not found", "regions": []}
         )
         for key, value in CORS_HEADERS.items():
             response.headers[key] = value
@@ -71,7 +71,8 @@ async def analytics_endpoint(request: Request):
             "breaches": breaches
         })
     
-    response = JSONResponse(content=results)
+    # Return with regions array at top level
+    response = JSONResponse(content={"regions": results})
     for key, value in CORS_HEADERS.items():
         response.headers[key] = value
     return response
