@@ -1,40 +1,56 @@
 # api/index.py
-from fastapi import FastAPI
-from starlette.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from statistics import mean
 import json
 import os
 
-# Custom CORS middleware that FORCESets *
-class ForceCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-        # Remove Vary header that causes origin echoing
-        if "Vary" in response.headers:
-            del response.headers["Vary"]
-        return response
-
 app = FastAPI()
-app.add_middleware(ForceCORSMiddleware)
+
+# CORS headers dictionary
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Expose-Headers": "Access-Control-Allow-Origin",
+}
+
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    response = await call_next(request)
+    for key, value in CORS_HEADERS.items():
+        response.headers[key] = value
+    return response
 
 @app.post("/analytics")
-def analytics_endpoint(data: dict):
-    regions = data.get("regions", [])
-    threshold_ms = data.get("threshold_ms", 180)
+async def analytics_endpoint(request: Request):
+    try:
+        body = await request.json()
+        regions = body.get("regions", [])
+        threshold_ms = body.get("threshold_ms", 180)
+    except:
+        response = JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON"}
+        )
+        for key, value in CORS_HEADERS.items():
+            response.headers[key] = value
+        return response
     
     try:
         file_path = os.path.join(os.path.dirname(__file__), "..", "q-vercel-latency.json")
         with open(file_path, "r") as f:
             telemetry = json.load(f)
     except FileNotFoundError:
-        return JSONResponse(status_code=404, content={"error": "File not found"})
+        response = JSONResponse(
+            status_code=404,
+            content={"error": "File not found"}
+        )
+        for key, value in CORS_HEADERS.items():
+            response.headers[key] = value
+        return response
     
     results = []
-    
     for region in regions:
         region_data = [r for r in telemetry if r.get("region") == region]
         if not region_data:
@@ -55,8 +71,19 @@ def analytics_endpoint(data: dict):
             "breaches": breaches
         })
     
-    return JSONResponse(content=results)
+    response = JSONResponse(content=results)
+    for key, value in CORS_HEADERS.items():
+        response.headers[key] = value
+    return response
 
 @app.get("/")
 def read_root():
     return {"message": "OK"}
+
+@app.options("/analytics")
+async def options_handler(request: Request):
+    response = JSONResponse(content={})
+    for key, value in CORS_HEADERS.items():
+        response.headers[key] = value
+    response.headers["Access-Control-Max-Age"] = "86400"
+    return response
